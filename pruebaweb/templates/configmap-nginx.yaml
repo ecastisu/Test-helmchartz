@@ -1,0 +1,11 @@
+{{- if .Values.nginxConfig.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pruebaweb.fullname" . }}-nginx-conf
+  labels:
+    {{- include "pruebaweb.labels" . | nindent 4 }}
+data:
+  default.conf: |
+{{- nindent 4 .Values.nginxConfig.serverBlock }}
+{{- end }}

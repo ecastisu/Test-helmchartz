@@ -1,0 +1,83 @@
+replicaCount: 2
+
+image:
+  repository: radamantis182/pruebaweb
+  tag: v2
+  pullPolicy: Always
+
+logger:
+  enabled: true
+  image: busybox
+  tag: "1.36"
+  command: ["/bin/sh", "-c"]
+  args: ["tail -n+1 -F /var/log/nginx/access.log /var/log/nginx/error.log"]
+
+exporter:
+  enabled: true
+  image: nginx/nginx-prometheus-exporter
+  tag: "edge"
+  port: 9113
+  scrapeUri: "http://127.0.0.1:80/stub_status"
+
+service:
+  type: NodePort
+  httpPort: 80
+  httpNodePort: 30080
+  metricsPort: 9113
+  metricsNodePort: 30913
+
+ingress:
+  enabled: false            # no puedes usar Ingress ahora; déjalo en false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  paths:
+    - path: /web
+      pathType: Prefix
+      servicePort: 80
+    - path: /metrics
+      pathType: Prefix
+      servicePort: 9113
+  hosts:
+    - host: ""
+  tls: []                   # sin TLS por ahora
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ConfigMap para NGINX con stub_status
+nginxConfig:
+  enabled: true
+  serverBlock: |
+    server {
+      listen 80;
+      server_name _;
+
+      root /usr/share/nginx/html;
+      index index.html;
+
+      location / {
+        try_files $uri $uri/ =404;
+      }
+
+      location /stub_status {
+        stub_status;
+        allow 0.0.0.0/0;
+      }
+    }
+serviceAccount:
+  create: false
+  name: ""
+  automount: true
+  annotations: {}
+
+  
+# values.yaml
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+  # targetMemoryUtilizationPercentage: 70  # opcional

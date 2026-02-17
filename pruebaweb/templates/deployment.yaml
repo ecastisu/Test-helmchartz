@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pruebaweb.fullname" . }}
+  labels:
+    {{- include "pruebaweb.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "pruebaweb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pruebaweb.selectorLabels" . | nindent 8 }}
+    spec:
+      volumes:
+        - name: logs
+          emptyDir: {}
+        {{- if .Values.nginxConfig.enabled }}
+        - name: nginx-conf
+          configMap:
+            name: {{ include "pruebaweb.fullname" . }}-nginx-conf
+        {{- end }}
+      containers:
+        # Contenedor principal NGINX
+        - name: pruebaweb
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: logs
+              mountPath: /var/log/nginx
+            {{- if .Values.nginxConfig.enabled }}
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+            {{- end }}
+
+        # Sidecar logger (opcional)
+        {{- if .Values.logger.enabled }}
+        - name: logger
+          image: "{{ .Values.logger.image }}:{{ .Values.logger.tag }}"
+          command: {{ toJson .Values.logger.command }}
+          args: {{ toJson .Values.logger.args }}
+          volumeMounts:
+            - name: logs
+              mountPath: /var/log/nginx
+        {{- end }}
+
+        # Sidecar nginx-prometheus-exporter (opcional)
+        {{- if .Values.exporter.enabled }}
+        - name: nginx-exporter
+          image: "{{ .Values.exporter.image }}:{{ .Values.exporter.tag }}"
+          args:
+            - "-nginx.scrape-uri={{ .Values.exporter.scrapeUri }}"
+          ports:
+            - containerPort: {{ .Values.exporter.port }}
+              name: metrics
+        {{- end }}

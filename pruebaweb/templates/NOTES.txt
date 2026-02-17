@@ -1,0 +1,13 @@
+Web:
+  NodePort → http://127.0.0.1:{{ .Values.service.httpNodePort }}
+
+Métricas Prometheus:
+  NodePort → http://127.0.0.1:{{ .Values.service.metricsNodePort }}/metrics
+
+Stub status (si activaste el ConfigMap):
+  http://127.0.0.1:{{ .Values.service.httpNodePort }}/stub_status
+
+Comandos útiles:
+  - Ver pods:      kubectl get pods -l app.kubernetes.io/name={{ include "pruebaweb.name" . }}
+  - Ver service:   kubectl get svc {{ include "pruebaweb.fullname" . }}
+  - Ver endpoints: kubectl get endpoints {{ include "pruebaweb.fullname" . }}
