@@ -1,0 +1,103 @@
+name: CI/CD - Build to ACR + Helm upgrade on AKS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "app/**"
+      - "pruebaweb/**"
+      - ".github/workflows/cicd-aks.yml"
+  workflow_dispatch:
+
+env:
+  # ==== AJUSTA ESTOS 4 VALORES A TU ENTORNO ====
+  ACR_NAME: adonayacr                # <--- tu ACR
+  AKS_RESOURCE_GROUP: rg-pruebaweb   # <--- RG del AKS
+  AKS_CLUSTER_NAME: aks-pruebaweb    # <--- nombre del AKS
+  NAMESPACE: web                     # namespace de despliegue
+  RELEASE_NAME: pruebaweb            # nombre del release de Helm
+  CHART_DIR: pruebaweb               # carpeta del chart en el repo
+  IMAGE_NAME: pruebaweb              # nombre del repo en ACR (lado derecho)
+  # ============================================
+
+jobs:
+  build-push-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (Service Principal)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get ACR login server
+        id: acr
+        run: |
+          LOGIN_SERVER=$(az acr show -n $ACR_NAME --query "loginServer" -o tsv)
+          echo "login_server=$LOGIN_SERVER" >> $GITHUB_OUTPUT
+
+      - name: Docker login to ACR
+        run: |
+          az acr login -n $ACR_NAME
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          DATE_TAG="v$(date +'%Y.%m.%d')-${SHORT_SHA}"
+          echo "short=${SHORT_SHA}"   >> $GITHUB_OUTPUT
+          echo "date_tag=${DATE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push image to ACR
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.acr.outputs.login_server }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.short }}
+            ${{ steps.acr.outputs.login_server }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.date_tag }}
+            ${{ steps.acr.outputs.login_server }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      # (Opcional) Previsualiza cambios antes con helm-diff
+      - name: Install helm-diff plugin
+        run: helm plugin install https://github.com/databus23/helm-diff || true
+
+      - name: Helm diff (preview)
+        run: |
+          helm diff upgrade ${{ env.RELEASE_NAME }} ${{ env.CHART_DIR }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --allow-unreleased \
+            --set image.repository=${{ steps.acr.outputs.login_server }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=sha-${{ steps.meta.outputs.short }} || true
+
+      - name: Helm upgrade --install (atomic)
+        run: |
+          helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.CHART_DIR }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --wait --atomic \
+            --set image.repository=${{ steps.acr.outputs.login_server }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=sha-${{ steps.meta.outputs.short }}
